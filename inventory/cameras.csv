@@ -1,0 +1,9 @@
+nombre,ip,sitio,ubicacion,ambiente,tipo,marca,modelo,serie,mac,mascara,gateway,red,ptz,lpr
+CAM001,192.0.2.10,Sitio Norte,Entrada principal,exterior,BULLET,BOSCH,NDV-3502-F02,,,,,,0,0
+CAM002,192.0.2.11,Sitio Norte,Playón de carga,exterior,DOMO PTZ,SONY,SNC-XM631,,,,,,1,0
+CAM003,192.0.2.12,Sitio Norte,Depósito,interior,MINI DOMO,BOSCH,NDV-3502-F02,,,,,,0,0
+CAM004,192.0.2.20,Sitio Sur,Portón de ingreso,exterior,LPR,GENETEC,SharpV,,,,,,0,1
+CAM005,192.0.2.21,Sitio Sur,Taller mecánico,interior,BULLET,AXIS,P1465-LE,,,,,,0,0
+CAM006,192.0.2.30,Sitio Este,Oficinas,interior,MINI DOMO,BOSCH,NDV-3502-F02,,,,,,0,0
+CAM007,192.0.2.31,Sitio Este,Perímetro,exterior,DOMO PTZ,SONY,SNC-XM631,,,,,,1,0
+CAM008,192.0.2.40,Sitio Oeste,Playa de estacionamiento,exterior,BULLET,BOSCH,NDV-3502-F02,,,,,,0,0

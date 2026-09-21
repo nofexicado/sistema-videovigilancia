@@ -1,0 +1,20 @@
+# credenciales y llaves — nunca al repositorio
+tools/credentials.json
+datos/
+*.key
+
+# resultados de relevamiento (pueden contener rutas internas)
+tools/inventario.json
+inventario.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# varios
+*.xlsx
+.env
+*.tar.gz
+/logo.png

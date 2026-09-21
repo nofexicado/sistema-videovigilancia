@@ -1,0 +1,47 @@
+﻿[Unit]
+Description=Sistema de Videovigilancia - videovigilancia
+Documentation=file:/opt/sistema-videovigilancia/README.md
+# El grabador necesita la red arriba de verdad, no solo configurada: si arranca
+# antes, los primeros ffmpeg fallan contra todas las camaras a la vez.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sistema-videovigilancia
+Group=sistema-videovigilancia
+WorkingDirectory=/opt/sistema-videovigilancia/backend
+
+# SISTEMA_VIDEOVIGILANCIA_DATOS tiene que apuntar al volumen grande: ahi van las grabaciones.
+# Si queda en el disco del sistema, se llena y el servidor deja de arrancar.
+Environment=SISTEMA_VIDEOVIGILANCIA_DATOS=/srv/sistema-videovigilancia
+Environment=SISTEMA_VIDEOVIGILANCIA_VOLUMEN_TB=1.80
+Environment=SISTEMA_VIDEOVIGILANCIA_RETENCION_DIAS=14
+Environment=SISTEMA_VIDEOVIGILANCIA_ARCHIVAR=1
+# Conversion bajo demanda apagada: se prende desde el muro si la CPU molesta.
+# Ver la seccion "Conversion bajo demanda" del README.
+Environment=SISTEMA_VIDEOVIGILANCIA_CONVERSION_DEMANDA=0
+# TLS lo termina nginx (ver despliegue/nginx.sh); la app queda detras y solo
+# escucha en localhost. Por eso la cookie va con Secure y uvicorn confia en las
+# cabeceras X-Forwarded-* que pone nginx.
+Environment=SISTEMA_VIDEOVIGILANCIA_COOKIE_SEGURA=1
+
+ExecStart=/opt/sistema-videovigilancia/venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips=127.0.0.1
+
+Restart=on-failure
+RestartSec=5
+
+# El grabador lanza un ffmpeg por camara. Sin esto quedan huerfanos comiendo
+# CPU despues de cada reinicio, que es exactamente lo que satura al R710.
+KillMode=control-group
+TimeoutStopSec=30
+
+# Endurecimiento basico. El servicio solo necesita escribir en su volumen.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/sistema-videovigilancia
+
+[Install]
+WantedBy=multi-user.target

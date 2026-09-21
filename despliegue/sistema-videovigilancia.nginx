@@ -1,0 +1,110 @@
+﻿# Cache de las autorizaciones de video. Ver `location = /_sesion` mas abajo.
+# 1 MB de claves alcanza para miles de sesiones; el cuerpo es vacio (204), asi
+# que `max_size` esta de puro tramite.
+proxy_cache_path /var/cache/nginx/sistema-videovigilancia-sesion levels=1:2
+                 keys_zone=sesion:1m max_size=8m inactive=120s use_temp_path=off;
+
+# nginx como frente TLS de Sistema de Videovigilancia. Termina HTTPS y proxya a uvicorn, que solo
+# escucha en 127.0.0.1:8000. Lo instala despliegue/nginx.sh.
+
+# Todo lo que llegue por HTTP se manda a HTTPS.
+server {
+    listen 80;
+    server_name _;   # sin dominio: certificado autofirmado por IP (ver nginx.sh)
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    # HTTP/2, y no es un lujo: el muro abre un reproductor HLS por camara y cada
+    # uno pide su playlist y un segmento de 2 s todo el tiempo. Chrome permite 6
+    # conexiones por origen en HTTP/1.1, asi que con 26 recuadros los segmentos
+    # llegaban tarde, hls.js se quedaba sin buffer y TODO el muro parpadeaba en
+    # ciclo. h2 multiplexa sobre una sola conexion y el limite desaparece.
+    http2 on;
+    server_name _;   # sin dominio: certificado autofirmado por IP (ver nginx.sh)
+
+    ssl_certificate     /etc/ssl/sistema-videovigilancia/sistema-videovigilancia.crt;
+    ssl_certificate_key /etc/ssl/sistema-videovigilancia/sistema-videovigilancia.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+
+    # Sin límite de subida chico: no bloquea nada, pero deja margen si algún día
+    # se sube un archivo grande por la API.
+    client_max_body_size 32m;
+
+    # URL amable de entrada: quien escriba .../sistema-videovigilancia (con o sin barra) cae en
+    # la app. Es solo la puerta -- la barra del navegador termina en la raíz.
+    location = /sistema-videovigilancia  { return 301 /; }
+    location = /sistema-videovigilancia/ { return 301 /; }
+
+    # --- el video lo sirve nginx, no Python -------------------------------
+    #
+    # Medido el 2026-09-10 sobre el parque en marcha: de cada 100 peticiones
+    # que llegaban a uvicorn, 98,5 eran segmentos HLS -- 5836 contra 86 de la
+    # API en diez minutos. Cada una atravesaba el middleware de sesion, el
+    # StaticFiles de Starlette y una lectura en Python, para devolver un
+    # fichero que nginx entrega con sendfile sin despertar al interprete.
+    #
+    # De paso desaparece "Response content longer than Content-Length", que
+    # aparecia unas diez veces por dia: StaticFiles hace stat() y despues abre
+    # el fichero, y si ffmpeg renombra el segmento en ese hueco la respuesta
+    # trae mas bytes de los declarados y el segmento se corta. nginx sirve del
+    # descriptor que ya tiene abierto.
+    #
+    # La ruta tiene que coincidir con SISTEMA_VIDEOVIGILANCIA_DATOS del .service, mas /video.
+    location /media/ {
+        # La sesion NO se pierde: cada pedido dispara una subpeticion interna
+        # a la API. Validar la cookie es HMAC y nada mas -- sin base de datos y
+        # sin tocar el disco -- asi que cuesta una fraccion de lo que costaba
+        # servir el fichero entero.
+        auth_request /_sesion;
+        alias /srv/sistema-videovigilancia/video/;
+
+        # Las playlists en vivo se reescriben cada dos segundos y los segmentos
+        # se borran al rotar: nada de esto se puede cachear rio abajo.
+        add_header Cache-Control "no-store" always;
+        sendfile on;
+        tcp_nopush on;
+        # Un segmento que ya no esta (lo levanto la purga o la rotacion) es un
+        # 404 normal, no algo que valga la pena registrar 5000 veces por hora.
+        log_not_found off;
+    }
+
+    # Solo la usa auth_request. `internal` impide que se pida desde afuera.
+    location = /_sesion {
+        internal;
+        proxy_pass http://127.0.0.1:8000/api/sesion;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header Host $host;
+
+        # Y la respuesta se cachea por cookie. Sin esto, un solo navegador con
+        # el muro abierto genera 28 subpeticiones por segundo -- una por
+        # playlist y una por segmento de cada camara-- que en el R710 median
+        # casi un tercio de nucleo en puro trabajo de framework. Con 30 s de
+        # vigencia queda una consulta cada 30 s por sesion.
+        #
+        # No abre una ventana: la cookie es HMAC con vencimiento propio de 12 h
+        # y no hay estado en el servidor, asi que "cerrar sesion" ya era borrar
+        # la cookie del navegador. Treinta segundos no le agregan nada a eso.
+        # Los rechazos se cachean menos, para que entrar no se sienta trabado.
+        proxy_cache sesion;
+        proxy_cache_key $cookie_sistema-videovigilancia_sesion;
+        proxy_cache_valid 204 30s;
+        proxy_cache_valid 401 403 5s;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # Esto le dice a la app que la conexión original fue HTTPS, para que la
+        # cookie Secure tenga sentido y nada intente "bajar" a HTTP.
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # El video HLS son segmentos que rotan; que no los cachee un intermedio.
+        proxy_read_timeout 300s;
+    }
+}
